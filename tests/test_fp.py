@@ -336,6 +336,21 @@ class TestFixedPoint:
         np.testing.assert_equal((fa - fb).bdata, a.ravel() - b.ravel())
         np.testing.assert_equal((fa * fb).bdata, a.ravel() * b.ravel())
 
+    # --- reducing the bit width ---
+
+    @pytest.mark.parametrize("method", ["truncate", "round_from_zero", "round_to_even", "truncate_msb"])
+    def test_reduce_rejects_larger_or_all_bits(self, method):
+        fp = FixedPoint(8, 2, np.array([1.5, -2.25]))
+        with pytest.raises(ValueError):
+            getattr(fp, method)(10)
+        with pytest.raises(ValueError):
+            getattr(fp, method)(-8)
+
+    def test_truncate_same_bw_is_noop(self):
+        fp = FixedPoint(8, 2, np.array([1.5, -2.25]))
+        assert fp.truncate(8) == fp
+        assert fp.truncate_msb(8) == fp
+
     # --- equality ---
 
     def test_eq(self):

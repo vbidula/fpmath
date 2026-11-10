@@ -206,6 +206,21 @@ class FixedPoint:
             return NotImplemented
         return self.bwfw == other.bwfw and np.array_equal(self.bdata, other.bdata)
 
+    def _bits_to_drop(self, bw: int) -> int:
+        """
+        Number of bits removed when reducing this FixedPoint to the bit width ``bw``.
+
+        :param bw: New bit width. Negative value will be interpreted as a bw difference to remove.
+        :return: Number of bits to drop.
+        """
+        shift = self.bw - bw if bw >= 0 else -bw
+        if shift < 0:
+            raise ValueError(f"Cannot reduce a {self.bw}-bit FixedPoint to {bw} bits: the new bit width must not be "
+                             f"larger. Use cast() to widen it.")
+        if shift >= self.bw:
+            raise ValueError(f"Cannot drop {shift} bits from a {self.bw}-bit FixedPoint.")
+        return shift
+
     def __repr__(self):
         return f"{type(self)}({self.bw}, {self.fw})\nData: \n{self.binary}\n{self.data}"
 
@@ -418,33 +433,26 @@ class FixedPoint:
 
     def truncate(self, bw: int) -> FixedPoint:
         """
-        Truncate the FixedPoint to a new specified bit width. The current bit width will not be replaced if the new
-        value is larger. The relative position of the fixed point is not preserved.
+        Truncate the FixedPoint to a new specified bit width by dropping LSBs (rounding toward -inf). The new bit
+        width must not be larger than the current one. The relative position of the fixed point is not preserved.
 
         :param bw: New bit width of the FixedPoint. Negative value will be interpreted as a bw difference to remove.
         :return: A new FixedPoint instance.
         """
-        bdata = self.bdata.astype(self.dtype, copy=True)
-        if bw >= 0:
-            shift = self.bw - bw
-        else:
-            shift = abs(bw)
-        bdata = bdata >> shift
+        shift = self._bits_to_drop(bw)
+        bdata = self.bdata >> shift
         return self.__class__(self.bw - shift, max(0, self.fw - shift), bdata, disbin=True, ofmode=self.ofmode)
 
     def round_from_zero(self, bw: int) -> FixedPoint:
         """
         Round the FixedPoint to a new specified bit width. This implements a round to nearest with ties away
-        from zero. The bit width will not be replaced if the new value is larger. The relative position
+        from zero. The new bit width must be smaller than the current one. The relative position
         of the fixed point is preserved.
 
         :param bw: New bit width of the FixedPoint. Negative value will be interpreted as a bw difference to remove.
         :return: A new FixedPoint instance.
         """
-        if bw >= 0:
-            shift = self.bw - bw
-        else:
-            shift = abs(bw)
+        shift = self._bits_to_drop(bw)
         if shift == 0:
             raise ValueError("Cannot round zero bits.")
         rnd_off_mask = (1 << shift) - 1
@@ -460,19 +468,16 @@ class FixedPoint:
     def round_to_even(self, bw: int) -> FixedPoint:
         """
         Round the FixedPoint to a new specified bit width. This implements a round to nearest with ties to
-        nearest even. The current bit width will not be replaced if the new value is larger. The relative position
+        nearest even. The new bit width must be smaller than the current one. The relative position
         of the fixed point is preserved.
 
         :param bw: New bit width of the FixedPoint. Negative value will be interpreted as a bw difference to remove.
         :return: A new FixedPoint instance.
         """
-        obj = self.truncate(bw)
-        if bw >= 0:
-            shift = self.bw - bw
-        else:
-            shift = abs(bw)
+        shift = self._bits_to_drop(bw)
         if shift == 0:
             raise ValueError("Cannot round zero bits.")
+        obj = self.truncate(bw)
         rnd_off_mask = (1 << shift) - 1
         rnd_off_bin = self.bdata & rnd_off_mask
         tie_bin = 1 << (shift - 1)
@@ -485,7 +490,7 @@ class FixedPoint:
     def truncate_msb(self, bw: int) -> FixedPoint:
         """
         Truncate the FixedPoint from the left (MSB) to a specified bit width.
-        The current bit width will not be replaced if the new value is larger.
+        The new bit width must not be larger than the current one; use cast() to widen.
         The absolute position of the fixed point is preserved.
 
         Values that do not fit are handled according to ``ofmode``: 'wrap' matches slicing in VHDL
@@ -498,12 +503,7 @@ class FixedPoint:
         :param bw: New bit width of the FixedPoint. Negative value will be interpreted as a bw difference to remove.
         :return: A new FixedPoint instance.
         """
-        if bw >= 0:
-            new_bw = bw
-        else:
-            new_bw = self.bw + bw
-            if new_bw <= 0:
-                raise ValueError("Cannot truncate more bits that are present.")
+        new_bw = self.bw - self._bits_to_drop(bw)
         return self._narrow(new_bw, self.fw, self.bdata)
 
     def sum(self, axis: int) -> FixedPoint:
