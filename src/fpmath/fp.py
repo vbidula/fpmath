@@ -612,3 +612,48 @@ class FixedPoint:
         bdata[:, 1:] = self.bdata[:, :-1]
         bdata[:, 0] = bdata_insert
         return self.copy(new_bdata=bdata)
+
+
+class UFixedPoint(FixedPoint):
+    """
+    Unsigned fixed-point data type, the counterpart of numeric_std ``unsigned``.
+
+    Values are stored as non-negative integers in the (signed) storage ``dtype``, so the maximum bit width is one less
+    than the dtype width (63 for int64). All FixedPoint operations are available with unsigned semantics:
+
+    - raw binary input (``disbin=True``) and narrowing with ``ofmode='wrap'`` reduce modulo 2**bw (zero extension),
+      ``ofmode='saturate'`` clamps to [0, 2**bw - 1];
+    - ``>>`` and ``truncate()`` are logical shifts and ``cast()`` zero-extends;
+    - ``a - b`` grows by one bit and wraps modulo 2**(bw+1): when b > a the extra MSB is the borrow, like
+      ``resize(a, N+1) - resize(b, N+1)`` on unsigned. Convert with ``to_signed()`` for a signed difference;
+    - unary ``-`` is not defined, like in numeric_std.
+
+    Mixing UFixedPoint and FixedPoint operands raises, like mixing signed and unsigned in VHDL; convert explicitly.
+    """
+
+    @property
+    def _min_value(self) -> int:
+        return 0
+
+    @property
+    def _max_value(self) -> int:
+        return (1 << self.bw) - 1
+
+    @property
+    def _max_bw(self) -> int:
+        # Values are stored non-negative in a signed dtype, so its sign bit is not available
+        return self.nbits - 1
+
+    def mask_bitwidth(self, bdata: np.ndarray = None) -> np.ndarray:
+        """
+        Keeps the ``bw`` LSBs and clears all bits above them (zero extension), i.e. reduces modulo 2**bw.
+
+        :param bdata: Array to be masked. If None, self.bdata will be masked.
+        :return: Array masked.
+        """
+        if bdata is None:
+            bdata = self.bdata
+        return bdata.astype(self.dtype) & ((1 << self.bw) - 1)
+
+    def __neg__(self) -> UFixedPoint:
+        raise TypeError("Unary minus is not defined for UFixedPoint. Use to_signed() first.")
