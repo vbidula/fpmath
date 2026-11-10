@@ -190,6 +190,16 @@ class FixedPoint:
         fw = self.fw + obj.fw
         return self.__class__(bw, fw, self.bdata * obj.bdata, disbin=True, ofmode=self.ofmode)
 
+    def __eq__(self, other) -> bool:
+        """
+        Two FixedPoint are equal when they have the same format (bw, fw), the same shape and identical values.
+        ``ofmode`` and the storage ``dtype`` are not compared. Note that defining equality makes FixedPoint
+        unhashable, like numpy arrays.
+        """
+        if not isinstance(other, FixedPoint):
+            return NotImplemented
+        return self.bwfw == other.bwfw and np.array_equal(self.bdata, other.bdata)
+
     def __repr__(self):
         return f"{type(self)}({self.bw}, {self.fw})\nData: \n{self.binary}\n{self.data}"
 

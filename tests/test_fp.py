@@ -273,3 +273,16 @@ class TestFixedPoint:
     def test_saturate(self):
         fp = FixedPoint(18, 17, np.array([0.999999966165970, 2, -100]), ofmode="saturate")
         np.testing.assert_equal(fp.bdata, np.array([131071, 131071, -131072]))
+
+    # --- equality ---
+
+    def test_eq(self):
+        a = FixedPoint(8, 2, np.array([1.5, -2.25]))
+        assert a == FixedPoint(8, 2, np.array([1.5, -2.25]))
+        assert a == FixedPoint(8, 2, np.array([1.5, -2.25]), dtype=np.int32, ofmode="saturate")
+        assert a != FixedPoint(8, 2, np.array([1.5, -2.0]))
+        assert a != FixedPoint(9, 2, np.array([1.5, -2.25]))      # same value, different format
+        assert a != FixedPoint(8, 2, np.array([1.5]))             # different shape
+        assert a != a.bdata                                        # not a FixedPoint
+        with pytest.raises(TypeError):
+            hash(a)
