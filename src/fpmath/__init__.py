@@ -1,1 +1,1 @@
-from .fp import bit_reverse, rightshift, FixedPoint, FixedPointFormatWarning
+from .fp import bit_reverse, div_pow2, rightshift, FixedPoint, FixedPointFormatWarning

@@ -14,16 +14,32 @@ class FixedPointFormatWarning(UserWarning):
     """
 
 
-def rightshift(bdata: np.ndarray, shift: int) -> np.ndarray:
+def div_pow2(bdata: np.ndarray, shift: int) -> np.ndarray:
     """
-    Downshift the integer used for fixed point representation in FPT. This function is compatible with the negative
-    numbers padded with '1' from the left.
+    Divide the integers by 2**shift, rounding toward zero. Matches numeric_std ``x / 2**shift`` on ``signed``.
+
+    This is NOT an arithmetic shift: for negative values the result differs from ``shift_right()`` and from
+    dropping LSBs by slicing (both round toward -inf), e.g. ``div_pow2(-3, 1) == -1`` while ``-3 >> 1 == -2``.
 
     :param bdata: numpy array of integers
-    :param shift: number of positions to downshift the integer
-    :return: numpy array of integers shifted right
+    :param shift: power of two to divide by
+    :return: numpy array of integers divided by 2**shift and rounded toward zero, with the dtype of ``bdata``
     """
-    return np.sign(bdata) * (np.abs(bdata) >> shift)
+    bdata = np.asarray(bdata)
+    # Biasing negative values by 2**shift - 1 before the arithmetic shift turns floor into truncation toward zero.
+    # Unlike abs(), this cannot overflow on the most negative value of the dtype.
+    bias = np.where(bdata < 0, (1 << shift) - 1, 0).astype(bdata.dtype)
+    return (bdata + bias) >> shift
+
+
+def rightshift(bdata: np.ndarray, shift: int) -> np.ndarray:
+    """
+    Deprecated alias of :func:`div_pow2` (rounds toward zero). Use ``div_pow2`` for that behavior, or the
+    ``>>`` operator for an arithmetic shift that rounds toward -inf.
+    """
+    warnings.warn("rightshift() is deprecated: use div_pow2() for division rounding toward zero, or '>>' for an "
+                  "arithmetic shift", DeprecationWarning, stacklevel=2)
+    return div_pow2(bdata, shift)
 
 
 def bit_reverse(data: np.ndarray | int, nbits: int) -> np.ndarray | int:
@@ -293,7 +309,18 @@ class FixedPoint:
         return self.mask_bitwidth(bdata).astype(np.float64) / 2 ** self.fw
 
     def __rshift__(self, other: int) -> FixedPoint:
-        return self.copy(new_bdata=rightshift(self.bdata, other))
+        """
+        Arithmetic shift right, rounding toward -inf. Matches numeric_std ``shift_right()`` on ``signed`` and dropping
+        LSBs by slicing. Bit width and point position are kept. For rounding toward zero use :meth:`div_pow2`.
+        """
+        return self.copy(new_bdata=self.bdata >> other)
+
+    def div_pow2(self, shift: int) -> FixedPoint:
+        """
+        Divide by 2**shift, rounding toward zero. Matches numeric_std ``x / 2**shift`` on ``signed``.
+        Bit width and point position are kept. For an arithmetic shift (rounding toward -inf) use ``>>``.
+        """
+        return self.copy(new_bdata=div_pow2(self.bdata, shift))
 
     def __lshift__(self, other: int) -> FixedPoint:
         return self.copy(new_bdata=self.bdata << other)
@@ -364,17 +391,6 @@ class FixedPoint:
             shift = abs(bw)
         bdata = bdata >> shift
         return self.__class__(self.bw - shift, max(0, self.fw - shift), bdata, disbin=True, ofmode=self.ofmode)
-
-    def _round(self, bw: int):
-        """
-        :param bw: New bit width
-        :return: Truncated FixedPoint instance and round-off data in binary format.
-        """
-        shift = self.bw - bw
-        round_data = rightshift(self.bdata, shift) << shift
-        rnd_off = self.bdata - round_data
-        rnd_off = rightshift(rnd_off, shift - 1)
-        return self.truncate(bw), np.where(rnd_off > 0, 1, 0)
 
     def round_from_zero(self, bw: int) -> FixedPoint:
         """

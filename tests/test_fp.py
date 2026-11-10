@@ -3,17 +3,23 @@ import logging
 import numpy as np
 import pytest
 
-from fpmath import bit_reverse, rightshift, FixedPoint, FixedPointFormatWarning
+from fpmath import bit_reverse, div_pow2, rightshift, FixedPoint, FixedPointFormatWarning
 
 
 class TestFixedPoint:
 
-    def test_rightshift(self):
-        ref = np.array([0, 1, 2, 4, 8, -1, -2, -4, -8], dtype=np.int64)
+    def test_div_pow2(self):
+        ref = np.array([0, 1, 2, 4, 8, -1, -2, -3, -4, -8], dtype=np.int64)
         np.testing.assert_equal(
-            rightshift(ref, 1),
-            np.array([0, 0, 1, 2, 4, 0, -1, -2, -4], dtype=np.int64)
+            div_pow2(ref, 1),
+            np.array([0, 0, 1, 2, 4, 0, -1, -1, -2, -4], dtype=np.int64)
         )
+
+    def test_rightshift_deprecated_alias(self):
+        ref = np.array([3, -3], dtype=np.int64)
+        with pytest.warns(DeprecationWarning):
+            res = rightshift(ref, 1)
+        np.testing.assert_equal(res, div_pow2(ref, 1))
 
     def test_bit_reverse(self):
         ref = np.arange(10)
@@ -195,9 +201,25 @@ class TestFixedPoint:
         np.testing.assert_equal(fp2.bdata[0], 3)
 
     def test_rshift(self):
-        data = np.array([3, -3])
+        # Arithmetic shift: rounds toward -inf like numeric_std shift_right() on signed
+        data = np.array([3, -3, -1, -4])
         fp = FixedPoint(4, 0, data)
-        np.testing.assert_equal((fp >> 1).bdata, np.array([1, -1]))
+        res = fp >> 1
+        np.testing.assert_equal(res.bdata, np.array([1, -2, -1, -2]))
+        assert res.bwfw == fp.bwfw
+
+    def test_rshift_matches_truncate(self):
+        # Dropping LSBs by slicing must give the same integers as shifting
+        fp = FixedPoint(8, 0, np.arange(-128, 128))
+        for shift in range(1, 8):
+            np.testing.assert_equal((fp >> shift).bdata, fp.truncate(8 - shift).bdata)
+
+    def test_div_pow2_method(self):
+        # Rounds toward zero like numeric_std "/" on signed
+        fp = FixedPoint(4, 0, np.array([3, -3, -1, -4]))
+        res = fp.div_pow2(1)
+        np.testing.assert_equal(res.bdata, np.array([1, -1, 0, -2]))
+        assert res.bwfw == fp.bwfw
 
     def test_lshift(self):
         data = np.array([1, -1])
