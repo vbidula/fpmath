@@ -109,9 +109,10 @@ class FixedPoint:
         if not np.issubdtype(self.dtype, np.signedinteger):
             # Sign extension in mask_bitwidth() relies on arithmetic right shifts of signed integers
             raise TypeError(f"dtype must be a signed integer type, got {self.dtype.name}")
-        if bw > self.nbits:
-            raise ValueError(f"Bit width {bw} exceeds the {self.nbits} bits available in {self.dtype.name}. "
-                             f"Reduce the bit width with truncate() or round_*() before this operation.")
+        if bw > self._max_bw:
+            raise ValueError(f"Bit width {bw} exceeds the {self._max_bw} bits available for "
+                             f"{self.__class__.__name__} in {self.dtype.name}. Reduce the bit width with truncate() "
+                             f"or round_*() before this operation.")
         if data is not None:
             data = np.atleast_1d(data)
 
@@ -184,8 +185,7 @@ class FixedPoint:
         if self.ofmode == "saturate":
             # When bw equals the dtype width, -min does not fit even the storage type and wraps back to min before
             # it can be clamped, so it is mapped to max explicitly
-            min_value = -1 << (self.bw - 1)
-            neg = np.where(self.bdata == min_value, (1 << (self.bw - 1)) - 1, neg)
+            neg = np.where(self.bdata == self._min_value, self._max_value, neg)
         return self._narrow(self.bw, self.fw, neg)
 
     def __sub__(self, obj: FixedPoint) -> FixedPoint:
@@ -212,12 +212,14 @@ class FixedPoint:
 
     def __eq__(self, other) -> bool:
         """
-        Two FixedPoint are equal when they have the same format (bw, fw), the same shape and identical values.
-        ``ofmode`` and the storage ``dtype`` are not compared. Note that defining equality makes FixedPoint
-        unhashable, like numpy arrays.
+        Two FixedPoint are equal when they are of the same class (signed or unsigned), have the same format
+        (bw, fw), the same shape and identical values. ``ofmode`` and the storage ``dtype`` are not compared.
+        Note that defining equality makes FixedPoint unhashable, like numpy arrays.
         """
         if not isinstance(other, FixedPoint):
             return NotImplemented
+        if type(other) is not type(self):
+            return False
         return self.bwfw == other.bwfw and np.array_equal(self.bdata, other.bdata)
 
     def _result_dtype(self, obj: FixedPoint) -> np.dtype:
@@ -293,6 +295,30 @@ class FixedPoint:
         """
         return np.dtype(self.dtype).itemsize * 8
 
+    # Value range and width limit of the number representation. Subclasses with a different representation
+    # (e.g. unsigned) override these together with mask_bitwidth().
+
+    @property
+    def _min_value(self) -> int:
+        """
+        :return: Smallest representable integer value: -2**(bw-1) for two's complement.
+        """
+        return -1 << (self.bw - 1)
+
+    @property
+    def _max_value(self) -> int:
+        """
+        :return: Largest representable integer value: 2**(bw-1) - 1 for two's complement.
+        """
+        return (1 << (self.bw - 1)) - 1
+
+    @property
+    def _max_bw(self) -> int:
+        """
+        :return: Largest bit width the storage dtype can hold.
+        """
+        return self.nbits
+
     @property
     def binary(self):
         """
@@ -350,9 +376,7 @@ class FixedPoint:
 
     def _handle_overflow(self, bdata: np.ndarray):
         if self.ofmode == "saturate":
-            min_value = -1 << (self.bw - 1)
-            max_value = (1 << (self.bw - 1)) - 1
-            return np.clip(bdata, min_value, max_value)
+            return np.clip(bdata, self._min_value, self._max_value)
         return bdata
 
     def from_float(self, data: np.ndarray):
@@ -372,22 +396,25 @@ class FixedPoint:
         scaled = np.around(np.asarray(data, dtype=np.float64) * 2.0 ** self.fw)
         if np.any(np.isnan(scaled)):
             raise ValueError("Cannot convert NaN to FixedPoint.")
-        half = 2.0 ** (self.bw - 1)
-        full = 2.0 ** self.bw
         if self.ofmode == "saturate":
-            # scaled holds integers, so >= half means above the maximum value of half - 1
-            over = scaled >= half
-            under = scaled < -half
+            # Both limits are exact in float64: max + 1 is a power of two and min is zero or minus a power of two.
+            # scaled holds integers, so >= max + 1 means above the maximum value.
+            over = scaled >= float(self._max_value + 1)
+            under = scaled < float(self._min_value)
             in_range = np.where(over | under, 0.0, scaled).astype(np.int64)
-            bdata = np.where(over, (1 << (self.bw - 1)) - 1, np.where(under, -1 << (self.bw - 1), in_range))
+            bdata = np.where(over, self._max_value, np.where(under, self._min_value, in_range))
         else:
             if not np.all(np.isfinite(scaled)):
                 raise ValueError("Cannot wrap infinite values. Use ofmode='saturate' to clamp them.")
-            # fmod is exact for floats, and folding the remainder into [-half, half) is exact as well
-            # (Sterbenz lemma), so the result always fits int64
+            # fmod is exact for floats; mask_bitwidth() then reduces the remainder modulo 2**bw
+            full = 2.0 ** self.bw
             rem = np.fmod(scaled, full)
-            rem = np.where(rem >= half, rem - full, rem)
-            rem = np.where(rem < -half, rem + full, rem)
+            if self._min_value < 0:
+                # A signed 64-bit remainder may not fit int64, so fold it into [-half, half) first, which is
+                # exact as well (Sterbenz lemma)
+                half = full / 2
+                rem = np.where(rem >= half, rem - full, rem)
+                rem = np.where(rem < -half, rem + full, rem)
             bdata = rem.astype(np.int64)
         return self.mask_bitwidth(bdata)
 
@@ -421,9 +448,9 @@ class FixedPoint:
         """
         Shift left keeping bit width and point position. MSBs shifted out are handled according to ``ofmode``.
         """
-        if self.bw + other > self.nbits:
-            raise ValueError(f"Shifting a {self.bw}-bit FixedPoint left by {other} exceeds the {self.nbits} bits "
-                             f"available in {np.dtype(self.dtype).name}.")
+        if self.bw + other > self._max_bw:
+            raise ValueError(f"Shifting a {self.bw}-bit {self.__class__.__name__} left by {other} exceeds the "
+                             f"{self._max_bw} bits available in {self.dtype.name}.")
         return self._narrow(self.bw, self.fw, self.bdata << other)
 
     def __and__(self, other: int) -> FixedPoint:
