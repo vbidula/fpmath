@@ -503,6 +503,15 @@ class FixedPoint:
         """
         return self.__class__(self.bw, fw, self.bdata, disbin=True, dtype=self.dtype, ofmode=self.ofmode)
 
+    def as_unsigned(self) -> UFixedPoint:
+        """
+        Reinterpret the same bits as unsigned, like numeric_std ``unsigned(s)``: negative values become
+        2**bw + value. Bit width, point position, dtype and ofmode are kept.
+
+        :return: A new UFixedPoint instance.
+        """
+        return UFixedPoint(self.bw, self.fw, self.bdata, disbin=True, dtype=self.dtype, ofmode=self.ofmode)
+
     def truncate(self, bw: int) -> FixedPoint:
         """
         Truncate the FixedPoint to a new specified bit width by dropping LSBs (rounding toward -inf). The new bit
@@ -657,3 +666,24 @@ class UFixedPoint(FixedPoint):
 
     def __neg__(self) -> UFixedPoint:
         raise TypeError("Unary minus is not defined for UFixedPoint. Use to_signed() first.")
+
+    def to_signed(self) -> FixedPoint:
+        """
+        Convert to a signed FixedPoint one bit wider, keeping the values exactly, like numeric_std
+        ``signed('0' & u)``. Point position, dtype and ofmode are kept.
+
+        :return: A new FixedPoint instance with bw + 1 bits.
+        """
+        return FixedPoint(self.bw + 1, self.fw, self.bdata, disbin=True, dtype=self.dtype, ofmode=self.ofmode)
+
+    def as_signed(self) -> FixedPoint:
+        """
+        Reinterpret the same bits as signed, like numeric_std ``signed(u)``: values with the MSB set become
+        negative. Bit width, point position, dtype and ofmode are kept.
+
+        :return: A new FixedPoint instance.
+        """
+        return FixedPoint(self.bw, self.fw, self.bdata, disbin=True, dtype=self.dtype, ofmode=self.ofmode)
+
+    def as_unsigned(self) -> UFixedPoint:
+        raise TypeError("UFixedPoint is already unsigned. Use copy() for a copy.")

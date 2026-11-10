@@ -222,3 +222,45 @@ class TestUFixedPoint:
         fp = UFixedPoint(18, 0, np.array([0b11 << 16 | 5]), disbin=True)
         assert (fp >> 16).bdata[0] == 3
         assert fp.truncate(2).bdata[0] == 3
+
+    # --- explicit conversions ---
+
+    def test_to_signed_is_exact(self):
+        vals = np.arange(256)
+        u = UFixedPoint(8, 3, vals, disbin=True, dtype=np.int32, ofmode="saturate")
+        s = u.to_signed()
+        assert type(s) is FixedPoint and s.bwfw == (9, 3)
+        assert s.dtype == np.int32 and s.ofmode == "saturate"
+        np.testing.assert_equal(s.bdata, vals)
+        np.testing.assert_equal(s.data, u.data)
+        # Signed difference of two unsigned values after explicit conversion
+        a, b = UFixedPoint(4, 0, np.array([3]), disbin=True), UFixedPoint(4, 0, np.array([5]), disbin=True)
+        assert (a.to_signed() - b.to_signed()).bdata[0] == -2
+
+    def test_as_signed_reinterprets(self):
+        u = UFixedPoint(8, 0, np.array([0, 127, 128, 255]), disbin=True, dtype=np.int32)
+        s = u.as_signed()
+        assert type(s) is FixedPoint and s.bwfw == (8, 0) and s.dtype == np.int32
+        np.testing.assert_equal(s.bdata, np.array([0, 127, -128, -1]))
+
+    def test_as_unsigned_reinterprets(self):
+        s = FixedPoint(8, 2, np.array([0, 127, -128, -1]), disbin=True, ofmode="saturate")
+        u = s.as_unsigned()
+        assert type(u) is UFixedPoint and u.bwfw == (8, 2) and u.ofmode == "saturate"
+        np.testing.assert_equal(u.bdata, np.array([0, 127, 128, 255]))
+
+    def test_conversion_round_trips(self):
+        vals = np.arange(-128, 128)
+        s = FixedPoint(8, 0, vals, disbin=True)
+        assert s.as_unsigned().as_signed() == s
+        u = UFixedPoint(8, 0, np.arange(256), disbin=True)
+        assert u.as_signed().as_unsigned() == u
+        assert u.to_signed().as_unsigned().truncate_msb(8) == u
+
+    def test_conversion_errors(self):
+        u = UFixedPoint(8, 0, np.array([1]), disbin=True)
+        with pytest.raises(TypeError):
+            u.as_unsigned()
+        # A 64-bit signed value has no unsigned counterpart in int64 storage
+        with pytest.raises(ValueError):
+            FixedPoint(64, 0, np.array([1]), disbin=True).as_unsigned()
