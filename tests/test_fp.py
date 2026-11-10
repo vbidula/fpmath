@@ -363,3 +363,28 @@ class TestFixedPoint:
         assert a != a.bdata                                        # not a FixedPoint
         with pytest.raises(TypeError):
             hash(a)
+
+    # --- from_float out of range ---
+
+    @pytest.mark.parametrize("dtype", [np.int32, np.int64])
+    def test_from_float_out_of_range(self, dtype):
+        big = 2.0 ** 60 + 3072  # exactly representable in float64
+        data = np.array([1e10, -1e10, big, -big, np.inf, -np.inf])
+        sat = FixedPoint(16, 0, data, dtype=dtype, ofmode="saturate")
+        np.testing.assert_equal(sat.bdata, np.array([32767, -32768, 32767, -32768, 32767, -32768]))
+        wrap = FixedPoint(16, 0, data[:4], dtype=dtype, ofmode="wrap")
+        expected = [((int(v) + 2 ** 15) % 2 ** 16) - 2 ** 15 for v in data[:4]]
+        np.testing.assert_equal(wrap.bdata, np.array(expected))
+
+    def test_from_float_64_bit_extremes(self):
+        data = np.array([2.0 ** 63, -2.0 ** 63, 1e30, -1e30])
+        sat = FixedPoint(64, 0, data, ofmode="saturate")
+        np.testing.assert_equal(sat.bdata, np.array([2 ** 63 - 1, -2 ** 63, 2 ** 63 - 1, -2 ** 63]))
+        wrap = FixedPoint(64, 0, data[:2])
+        np.testing.assert_equal(wrap.bdata, np.array([-2 ** 63, -2 ** 63]))
+
+    def test_from_float_rejects_nan_and_wrapping_inf(self):
+        with pytest.raises(ValueError):
+            FixedPoint(16, 0, np.array([np.nan]), ofmode="saturate")
+        with pytest.raises(ValueError):
+            FixedPoint(16, 0, np.array([np.inf]), ofmode="wrap")

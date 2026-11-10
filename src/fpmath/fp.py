@@ -338,12 +338,35 @@ class FixedPoint:
         its fixed-point representation according to the bit width and
         binary point of this data type.
 
+        Values are rounded to nearest (ties to even). Out-of-range values wrap or saturate according to
+        ``ofmode``; this is done in the float domain because casting an out-of-range float to an integer is
+        platform-dependent in numpy. The conversion is exact as long as the scaled values are representable in
+        float64 (up to 53 significant bits).
+
         :param data: Array to be converted.
         :return: Data array in binary format.
         """
-        _bdata = np.around(data * 2 ** self.fw).astype(self.dtype)
-        _bdata = self._handle_overflow(_bdata)
-        return self.mask_bitwidth(_bdata)
+        scaled = np.around(np.asarray(data, dtype=np.float64) * 2.0 ** self.fw)
+        if np.any(np.isnan(scaled)):
+            raise ValueError("Cannot convert NaN to FixedPoint.")
+        half = 2.0 ** (self.bw - 1)
+        full = 2.0 ** self.bw
+        if self.ofmode == "saturate":
+            # scaled holds integers, so >= half means above the maximum value of half - 1
+            over = scaled >= half
+            under = scaled < -half
+            in_range = np.where(over | under, 0.0, scaled).astype(np.int64)
+            bdata = np.where(over, (1 << (self.bw - 1)) - 1, np.where(under, -1 << (self.bw - 1), in_range))
+        else:
+            if not np.all(np.isfinite(scaled)):
+                raise ValueError("Cannot wrap infinite values. Use ofmode='saturate' to clamp them.")
+            # fmod is exact for floats, and folding the remainder into [-half, half) is exact as well
+            # (Sterbenz lemma), so the result always fits int64
+            rem = np.fmod(scaled, full)
+            rem = np.where(rem >= half, rem - full, rem)
+            rem = np.where(rem < -half, rem + full, rem)
+            bdata = rem.astype(np.int64)
+        return self.mask_bitwidth(bdata)
 
     def to_float(self, bdata: np.ndarray = None) -> np.ndarray:
         """
