@@ -274,6 +274,68 @@ class TestFixedPoint:
         fp = FixedPoint(18, 17, np.array([0.999999966165970, 2, -100]), ofmode="saturate")
         np.testing.assert_equal(fp.bdata, np.array([131071, 131071, -131072]))
 
+    # --- ofmode: narrowing operations wrap (default) or saturate; widening and raw-bit loading never clamp ---
+
+    @staticmethod
+    def _wrap(values, bw):
+        return ((values + (1 << (bw - 1))) % (1 << bw)) - (1 << (bw - 1))
+
+    @staticmethod
+    def _clip(values, bw):
+        return np.clip(values, -(1 << (bw - 1)), (1 << (bw - 1)) - 1)
+
+    def test_default_ofmode_is_wrap(self):
+        assert FixedPoint(4, 0, np.array([0])).ofmode == "wrap"
+        np.testing.assert_equal(FixedPoint(4, 0, np.array([9.0])).bdata, np.array([-7]))
+
+    def test_truncate_msb_ofmode(self):
+        vals = np.arange(-128, 128)
+        wrapped = FixedPoint(8, 0, vals, disbin=True, ofmode="wrap").truncate_msb(4)
+        saturated = FixedPoint(8, 0, vals, disbin=True, ofmode="saturate").truncate_msb(4)
+        np.testing.assert_equal(wrapped.bdata, self._wrap(vals, 4))
+        np.testing.assert_equal(saturated.bdata, self._clip(vals, 4))
+        assert saturated.bwfw == (4, 0)
+        assert saturated.ofmode == "saturate"
+
+    def test_neg_ofmode(self):
+        vals = np.arange(-8, 8)
+        np.testing.assert_equal((-FixedPoint(4, 0, vals, disbin=True, ofmode="wrap")).bdata, self._wrap(-vals, 4))
+        np.testing.assert_equal((-FixedPoint(4, 0, vals, disbin=True, ofmode="saturate")).bdata, self._clip(-vals, 4))
+
+    def test_lshift_ofmode(self):
+        vals = np.arange(-8, 8)
+        for shift in range(1, 4):
+            np.testing.assert_equal((FixedPoint(4, 0, vals, disbin=True, ofmode="wrap") << shift).bdata,
+                                    self._wrap(vals << shift, 4))
+            np.testing.assert_equal((FixedPoint(4, 0, vals, disbin=True, ofmode="saturate") << shift).bdata,
+                                    self._clip(vals << shift, 4))
+        with pytest.raises(ValueError):
+            FixedPoint(60, 0, np.array([1])) << 5
+
+    @pytest.mark.parametrize("method", ["round_from_zero", "round_to_even"])
+    def test_round_overflow_ofmode(self, method):
+        # 7.75 in 6 bits (fw=2) rounds up to 8, which does not fit into 4 bits
+        data = np.array([7.75, -8.0])
+        wrapped = getattr(FixedPoint(6, 2, data, ofmode="wrap"), method)(4)
+        saturated = getattr(FixedPoint(6, 2, data, ofmode="saturate"), method)(4)
+        np.testing.assert_equal(wrapped.bdata, np.array([-8, -8]))
+        np.testing.assert_equal(saturated.bdata, np.array([7, -8]))
+
+    def test_disbin_never_saturates(self):
+        # Raw DUT patterns are reinterpreted, never clamped: 16383 in 14 bits is -1
+        fp = FixedPoint(14, 0, np.array([16383, 8192, 100]), disbin=True, ofmode="saturate")
+        np.testing.assert_equal(fp.bdata, np.array([-1, -8192, 100]))
+        np.testing.assert_equal(fp.copy().bdata, fp.bdata)
+
+    def test_widening_ignores_ofmode(self):
+        vals = np.arange(-8, 8)
+        a, b = np.meshgrid(vals, vals)
+        fa = FixedPoint(4, 0, a.ravel(), disbin=True, ofmode="saturate")
+        fb = FixedPoint(4, 0, b.ravel(), disbin=True, ofmode="saturate")
+        np.testing.assert_equal((fa + fb).bdata, a.ravel() + b.ravel())
+        np.testing.assert_equal((fa - fb).bdata, a.ravel() - b.ravel())
+        np.testing.assert_equal((fa * fb).bdata, a.ravel() * b.ravel())
+
     # --- equality ---
 
     def test_eq(self):
