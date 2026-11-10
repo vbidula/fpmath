@@ -364,6 +364,74 @@ class TestFixedPoint:
         with pytest.raises(TypeError):
             hash(a)
 
+    # --- dtype ---
+
+    @pytest.mark.parametrize("dtype", [np.uint32, np.uint64, np.float64, np.bool_])
+    def test_dtype_must_be_signed_integer(self, dtype):
+        with pytest.raises(TypeError):
+            FixedPoint(8, 0, np.array([1]), disbin=True, dtype=dtype)
+
+    OPS = {
+        "add": lambda a, b: a + b,
+        "sub": lambda a, b: a - b,
+        "mul": lambda a, b: a * b,
+        "neg": lambda a, b: -a,
+        "rshift": lambda a, b: a >> 3,
+        "lshift": lambda a, b: a << 3,
+        "div_pow2": lambda a, b: a.div_pow2(3),
+        "and": lambda a, b: a & 0x0F,
+        "invert": lambda a, b: ~a,
+        "cast": lambda a, b: a.cast(20, 8),
+        "reinterpret": lambda a, b: a.reinterpret(0),
+        "truncate": lambda a, b: a.truncate(10),
+        "round_from_zero": lambda a, b: a.round_from_zero(10),
+        "round_to_even": lambda a, b: a.round_to_even(10),
+        "truncate_msb": lambda a, b: a.truncate_msb(10),
+        "sum": lambda a, b: a.sum(axis=0),
+        "getitem": lambda a, b: a[1:3],
+        "copy": lambda a, b: a.copy(),
+        "empty": lambda a, b: a.empty(),
+        "bit_reverse": lambda a, b: a.bit_reverse(),
+        "numpy_method": lambda a, b: a.reshape(-1),
+    }
+
+    @pytest.mark.parametrize("ofmode", ["wrap", "saturate"])
+    @pytest.mark.parametrize("op", OPS)
+    def test_ops_keep_dtype_and_match_int64(self, op, ofmode):
+        rng = np.random.default_rng(0)
+        raw_a, raw_b = rng.integers(-2 ** 15, 2 ** 15, size=(2, 64))
+        a32 = FixedPoint(16, 4, raw_a, disbin=True, dtype=np.int32, ofmode=ofmode)
+        b32 = FixedPoint(16, 4, raw_b, disbin=True, dtype=np.int32, ofmode=ofmode)
+        a64 = FixedPoint(16, 4, raw_a, disbin=True, ofmode=ofmode)
+        b64 = FixedPoint(16, 4, raw_b, disbin=True, ofmode=ofmode)
+        res32, res64 = self.OPS[op](a32, b32), self.OPS[op](a64, b64)
+        assert res32.dtype == np.int32
+        assert res32.bdata.dtype == np.int32
+        if op != "empty":
+            assert res32 == res64
+
+    def test_mixed_dtypes_use_wider(self):
+        a32 = FixedPoint(16, 0, np.array([3, -5]), disbin=True, dtype=np.int16)
+        a64 = FixedPoint(16, 0, np.array([3, -5]), disbin=True, dtype=np.int64)
+        for res in (a32 + a64, a64 - a32, a32 * a64):
+            assert res.dtype == np.int64
+
+    def test_result_too_wide_for_dtype_raises(self):
+        a = FixedPoint(16, 0, np.array([3]), disbin=True, dtype=np.int16)
+        with pytest.raises(ValueError):
+            a + a
+
+    @pytest.mark.parametrize("dtype, bw", [(np.int32, 32), (np.int64, 64)])
+    def test_full_width_extremes(self, dtype, bw):
+        # bw equal to the dtype width: the most negative value cannot be negated even in the storage type
+        mn, mx = -(1 << (bw - 1)), (1 << (bw - 1)) - 1
+        wrap = FixedPoint(bw, 0, np.array([mn, mx]), disbin=True, dtype=dtype)
+        sat = FixedPoint(bw, 0, np.array([mn, mx]), disbin=True, dtype=dtype, ofmode="saturate")
+        np.testing.assert_equal((-wrap).bdata, np.array([mn, -mx]))
+        np.testing.assert_equal((-sat).bdata, np.array([mx, -mx]))
+        np.testing.assert_equal(div_pow2(np.array([mn, mx], dtype=dtype), 1), np.array([mn // 2, mx // 2]))
+        assert div_pow2(np.array([mn], dtype=dtype), 1).dtype == dtype
+
     # --- from_float out of range ---
 
     @pytest.mark.parametrize("dtype", [np.int32, np.int64])
