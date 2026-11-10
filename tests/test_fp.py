@@ -142,6 +142,23 @@ class TestFixedPoint:
         mult_fp34 = fp3 * fp4
         np.testing.assert_array_equal(mult_fp34.data, data * data / 32)
 
+    def test_bw_limit(self):
+        # 32 x 32 -> 64 bits fits int64 exactly, including the extremes
+        extremes = np.array([-2**31, 2**31 - 1])
+        fp = FixedPoint(32, 0, extremes, disbin=True)
+        mult = fp * fp
+        assert mult.bw == 64
+        np.testing.assert_array_equal(mult.bdata, extremes * extremes)
+
+        with pytest.raises(ValueError):
+            FixedPoint(65, 0, np.array([0]))
+        with pytest.raises(ValueError):
+            FixedPoint(40, 0, np.array([1])) * FixedPoint(40, 0, np.array([1]))
+        with pytest.raises(ValueError):
+            fp.cast(65, 0)
+        with pytest.raises(ValueError):
+            mult + mult
+
     def test_truncate(self):
         data = np.arange(10) / 10
         fp = FixedPoint(8, 7, data)

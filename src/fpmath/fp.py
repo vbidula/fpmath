@@ -99,6 +99,9 @@ class FixedPoint:
         self.fw = fw
         self.dtype = dtype
         self.ofmode = ofmode
+        if bw > self.nbits:
+            raise ValueError(f"Bit width {bw} exceeds the {self.nbits} bits available in {np.dtype(dtype).name}. "
+                             f"Reduce the bit width with truncate() or round_*() before this operation.")
         if data is not None:
             data = np.atleast_1d(data)
 
