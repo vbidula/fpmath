@@ -292,10 +292,10 @@ class FixedPoint:
     def empty(self, shape: Tuple[int] = None) -> FixedPoint:
         """
         :param shape: Shape of the bdata array in the returned FixedPoint.
-        :return: An empty (no bdata) FixedPoint instance.
+        :return: A FixedPoint instance with the same format and uninitialized bdata, like ``np.empty``.
         """
         shape = shape or self.bdata.shape
-        return self.__class__(self.bw, self.fw, np.empty(shape, dtype=self.dtype), ofmode=self.ofmode)
+        return self.__class__(self.bw, self.fw, np.empty(shape, dtype=self.dtype), disbin=True, ofmode=self.ofmode)
 
     def mask_bitwidth(self, bdata: np.ndarray = None) -> np.ndarray:
         """
@@ -395,13 +395,12 @@ class FixedPoint:
     def cast(self, bw: int, fw: int) -> FixedPoint:
         """
         Cast the FixedPoint into a new one with specified bit width and binary point. Before
-        performing arithmetic operations on FixedPoint instances with different bw and fw, bot must
-        be casted to the same FixedPoint configuration. The new bw and fw parameters must be equal or
-        larger than the original FixedPoint configuration.
+        performing arithmetic operations on FixedPoint instances with different bw and fw, both must
+        be cast to the same FixedPoint configuration. The new bw and fw parameters must be equal or
+        larger than the original FixedPoint configuration, so casting never loses information.
 
-        Casting happens in two steps:
-        1. Right or left shifting based on the new point position (skipped if keep_lsb is True)
-        2. Truncating from the left
+        The data is shifted left by the increase of the fraction width (appending zero LSBs) and sign-extended
+        to the new bit width.
 
         :param bw: Bit width of the FixedPoint.
         :param fw: Fraction width starting from the lsb.
