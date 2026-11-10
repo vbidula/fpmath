@@ -104,6 +104,23 @@ class TestFixedPoint:
         assert sub_fp.fw == 5
         np.testing.assert_array_equal(sub_fp.data, data / 4)
 
+    def test_sub_exhaustive(self):
+        # Every 4-bit pair, including the most negative subtrahend: 0 - (-8) must be +8 in the 5-bit result
+        vals = np.arange(-8, 8)
+        a, b = np.meshgrid(vals, vals)
+        fp_a = FixedPoint(4, 0, a.ravel(), disbin=True)
+        fp_b = FixedPoint(4, 0, b.ravel(), disbin=True)
+        sub_fp = fp_a - fp_b
+        assert sub_fp.bwfw == (5, 0)
+        np.testing.assert_array_equal(sub_fp.bdata, a.ravel() - b.ravel())
+
+    def test_add_exhaustive(self):
+        vals = np.arange(-8, 8)
+        a, b = np.meshgrid(vals, vals)
+        add_fp = FixedPoint(4, 0, a.ravel(), disbin=True) + FixedPoint(4, 0, b.ravel(), disbin=True)
+        assert add_fp.bwfw == (5, 0)
+        np.testing.assert_array_equal(add_fp.bdata, a.ravel() + b.ravel())
+
     def test_mul(self):
         data = np.arange(10)
         fp1 = FixedPoint(9, 4, data)

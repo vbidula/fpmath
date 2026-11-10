@@ -114,36 +114,51 @@ class FixedPoint:
             raise ValueError("The bit width and point position of the value differs from the target FixedPoint")
         self.bdata.__setitem__(item, value.bdata)
 
+    def _addsub_format(self, obj: FixedPoint, op_name: str) -> Tuple[int, int]:
+        """
+        Validate the operands of an addition or subtraction and return the (bw, fw) of the result,
+        which includes one extra bit for the carry/borrow.
+        """
+        if type(obj) is not type(self):
+            raise ValueError(f"{op_name} is implemented only for the same class types")
+
+        if obj.bw != self.bw:
+            raise ValueError(f"Cannot apply {op_name.lower()} to FixedPoint with different bit width. You may want to "
+                             f"cast() the FixedPoint first.")
+
+        if obj.fw != self.fw:
+            warnings.warn(f"{op_name} of FixedPoint with different fraction width ({self.fw} and {obj.fw}) operates on "
+                          f"raw integers and may be unintentional. You may want to cast() the FixedPoint first.",
+                          FixedPointFormatWarning, stacklevel=3)
+
+        whole_bits = max([self.bw - self.fw, obj.bw - obj.fw])
+        fw = max([self.fw, obj.fw])
+        bw = fw + whole_bits + 1
+        return bw, fw
+
     def __add__(self, obj: FixedPoint) -> FixedPoint:
         """
         Return a new FixedPoint type resulting from summing this type with the provided one,
         including the carry bit. Increases bit width, but keeps point position.
         """
-        if type(obj) is not type(self):
-            raise ValueError("Addition is implemented only for the same class types")
-
-        if obj.bw != self.bw:
-            raise ValueError("Cannot add FixedPoint with different bit width. You may want to cast() the FixedPoint "
-                             "first.")
-
-        if obj.fw != self.fw:
-            warnings.warn(f"Addition of FixedPoint with different fraction width ({self.fw} and {obj.fw}) operates on "
-                          f"raw integers and may be unintentional. You may want to cast() the FixedPoint first.",
-                          FixedPointFormatWarning, stacklevel=2)
-
-        whole_bits = max([self.bw - self.fw, obj.bw - obj.fw])
-        fw = max([self.fw, obj.fw])
-        bw = fw + whole_bits + 1
+        bw, fw = self._addsub_format(obj, "Addition")
         return self.__class__(bw, fw, self.bdata + obj.bdata, disbin=True, ofmode=self.ofmode)
 
     def __neg__(self) -> "FixedPoint":
+        """
+        Two's complement negation at the same bit width, like numeric_std unary "-" on signed: the most negative
+        value wraps onto itself.
+        """
         return self.copy(-self.bdata)
 
     def __sub__(self, obj: FixedPoint) -> FixedPoint:
         """
-        Subtraction would still increase bit width.
+        Return a new FixedPoint type resulting from subtracting the provided one from this type, including the
+        borrow bit. Increases bit width, but keeps point position, so the result is always exact (equivalent to
+        resizing both operands by one bit before subtracting in VHDL).
         """
-        return self + (-obj)
+        bw, fw = self._addsub_format(obj, "Subtraction")
+        return self.__class__(bw, fw, self.bdata - obj.bdata, disbin=True, ofmode=self.ofmode)
 
     def __mul__(self, obj: FixedPoint) -> FixedPoint:
         """
