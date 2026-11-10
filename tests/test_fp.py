@@ -1,6 +1,9 @@
-import numpy as np
+import logging
 
-from fpmath import bit_reverse, rightshift, FixedPoint
+import numpy as np
+import pytest
+
+from fpmath import bit_reverse, rightshift, FixedPoint, FixedPointFormatWarning
 
 
 class TestFixedPoint:
@@ -55,15 +58,34 @@ class TestFixedPoint:
         data = np.arange(10) / 4
         fp = FixedPoint(8, 3, data, ofmode='wrap')
         fp2 = FixedPoint(10, 5, data, ofmode='wrap')
-        try:
+        with pytest.raises(ValueError):
             fp + fp2
-        except ValueError:
-            pass
 
         add_fp = fp.cast(10, 5) + fp2.cast(10, 5)
         assert add_fp.bw == 11
         assert add_fp.fw == 5
         np.testing.assert_array_equal(add_fp.data, data * 2)
+
+    def test_addsub_fw_mismatch_warns(self):
+        # Same bw, different fw: operates on raw integers like hardware, but warns about the missing cast
+        fp = FixedPoint(8, 2, np.array([1.0]))
+        fp2 = FixedPoint(8, 4, np.array([1.0]))
+        with pytest.warns(FixedPointFormatWarning):
+            add_fp = fp + fp2
+        np.testing.assert_array_equal(add_fp.bdata, fp.bdata + fp2.bdata)
+        with pytest.warns(FixedPointFormatWarning):
+            sub_fp = fp - fp2
+        np.testing.assert_array_equal(sub_fp.bdata, fp.bdata - fp2.bdata)
+
+    def test_no_logging_handlers_added(self):
+        fp = FixedPoint(8, 0, np.arange(4))
+        handlers_before = {name: len(lg.handlers) for name, lg in logging.root.manager.loggerDict.items()
+                           if isinstance(lg, logging.Logger)}
+        for _ in range(100):
+            fp = (fp + fp).truncate_msb(8)
+        handlers_after = {name: len(lg.handlers) for name, lg in logging.root.manager.loggerDict.items()
+                          if isinstance(lg, logging.Logger)}
+        assert handlers_after == handlers_before
 
     def test_twos_complement(self):
         data = np.arange(16)

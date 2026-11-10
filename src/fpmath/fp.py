@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import warnings
 from typing import Tuple, Literal
 
 import numpy as np
 
-from .utils import get_logger
+
+class FixedPointFormatWarning(UserWarning):
+    """
+    Emitted when an operation combines FixedPoint operands whose formats suggest a missing cast, e.g. adding
+    operands with different fraction widths. The operation itself still works on raw integers, exactly like the
+    hardware would. Escalate it to an error in tests with ``filterwarnings = error::fpmath.FixedPointFormatWarning``.
+    """
 
 
 def rightshift(bdata: np.ndarray, shift: int) -> np.ndarray:
@@ -76,7 +83,6 @@ class FixedPoint:
         self.fw = fw
         self.dtype = dtype
         self.ofmode = ofmode
-        self.logger = get_logger(self.__class__.__name__)
         if data is not None:
             data = np.atleast_1d(data)
 
@@ -121,8 +127,9 @@ class FixedPoint:
                              "first.")
 
         if obj.fw != self.fw:
-            self.logger.warning("Adding FixedPoint with different fraction width may be unintentional. You may want "
-                                "to cast() the FixedPoint first.")
+            warnings.warn(f"Addition of FixedPoint with different fraction width ({self.fw} and {obj.fw}) operates on "
+                          f"raw integers and may be unintentional. You may want to cast() the FixedPoint first.",
+                          FixedPointFormatWarning, stacklevel=2)
 
         whole_bits = max([self.bw - self.fw, obj.bw - obj.fw])
         fw = max([self.fw, obj.fw])
