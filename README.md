@@ -53,3 +53,25 @@ Decisions behind this:
 `bw` to its number of bits (results that would not fit raise a `ValueError`). Every operation keeps the dtype of
 its operand, and operations on two `FixedPoint` with different dtypes use the wider one, which never changes values.
 Results are identical for any dtype wide enough to hold them.
+
+### Unsigned values (`UFixedPoint`)
+
+`FixedPoint` is signed: every operation that adds or keeps upper bits fills them by sign extension, so unsigned
+signals cannot be modelled by reinterpreting results at the end (e.g. a multiplication whose operand has its MSB
+set produces different upper bits). `UFixedPoint` is the counterpart of `numeric_std` `unsigned`:
+
+- Values are stored as non-negative integers in the signed storage dtype, so the maximum bit width is one less than
+  the dtype width (63 for `int64`).
+- Raw binary input and wrapping reduce modulo 2^bw (zero extension); `ofmode="saturate"` clamps to [0, 2^bw - 1].
+  `>>` and `truncate()` are logical shifts, `cast()` zero-extends.
+- `a - b` grows by one bit and wraps modulo 2^(bw+1). When `b > a` the extra MSB is the borrow, like
+  `resize(a, N+1) - resize(b, N+1)` on `unsigned`.
+- Unary `-` raises a `TypeError`, as `numeric_std` has no unary minus for `unsigned`.
+- Mixing `FixedPoint` and `UFixedPoint` in `+`, `-` or `*` raises, like mixing `signed` and `unsigned` in VHDL, and
+  values of the two classes never compare equal. Convert explicitly:
+
+| Method | Result | VHDL |
+|---|---|---|
+| `UFixedPoint.to_signed()` | `FixedPoint`, one bit wider, same values | `signed('0' & u)` |
+| `UFixedPoint.as_signed()` | `FixedPoint`, same bits reinterpreted | `signed(u)` |
+| `FixedPoint.as_unsigned()` | `UFixedPoint`, same bits reinterpreted | `unsigned(s)` |
