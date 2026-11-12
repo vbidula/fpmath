@@ -456,3 +456,28 @@ class TestFixedPoint:
             FixedPoint(16, 0, np.array([np.nan]), ofmode="saturate")
         with pytest.raises(ValueError):
             FixedPoint(16, 0, np.array([np.inf]), ofmode="wrap")
+
+    def test_numpy_array_protocol(self):
+        """numpy must see the raw integers, not a 0-d object array.
+
+        This is load-bearing for downstream testbenches, which compare a bare FixedPoint
+        against an ndarray and assign one into an ndarray slice. It works today because
+        __getattr__ forwards __array_struct__ to bdata, which is incidental rather than
+        contractual, so pin it here: restricting __getattr__ without providing an explicit
+        __array__ would silently degrade these to object arrays instead of raising.
+        """
+        fp = FixedPoint(8, 7, np.array([[1, -2, 3, -4], [5, -6, 7, -8]]), disbin=True)
+
+        arr = np.asarray(fp)
+        assert arr.dtype == fp.bdata.dtype
+        assert arr.shape == fp.bdata.shape
+        np.testing.assert_array_equal(arr, fp.bdata)
+        assert np.shares_memory(arr, fp.bdata)
+
+        # a bare FixedPoint compares elementwise against an ndarray
+        np.testing.assert_array_equal(fp, fp.bdata)
+
+        # and can be assigned into an ndarray slice
+        buf = np.zeros(8, dtype=np.int64)
+        buf[:] = np.asarray(fp).ravel()
+        np.testing.assert_array_equal(buf, fp.bdata.ravel())
