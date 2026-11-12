@@ -481,3 +481,65 @@ class TestFixedPoint:
         buf = np.zeros(8, dtype=np.int64)
         buf[:] = np.asarray(fp).ravel()
         np.testing.assert_array_equal(buf, fp.bdata.ravel())
+
+
+class TestShiftInsert:
+    """The delay line used to model a buffer, shifting along the last axis.
+
+    Had no tests before: it has one caller in ghostfft and the 2-D case was its only
+    exercised path. These pin the 2-D behaviour as it has always been, and the leading-axis
+    behaviour it gained when the hardcoded ``[:, ...]`` indexing became ``[..., ...]``.
+    """
+
+    def test_two_dimensional_shifts_along_the_last_axis(self):
+        """The original behaviour, unchanged: rows are buffers, columns are time."""
+        fp = FixedPoint(8, 0, np.array([[1, 2, 3], [4, 5, 6]]), disbin=True)
+        out = fp.shift_insert(np.array([9, 8]))
+        np.testing.assert_array_equal(out.bdata, [[9, 1, 2], [8, 4, 5]])
+
+    def test_the_last_entry_is_discarded(self):
+        fp = FixedPoint(8, 0, np.array([[1, 2]]), disbin=True)
+        np.testing.assert_array_equal(fp.shift_insert(np.array([7])).bdata, [[7, 1]])
+
+    def test_leading_axes_are_independent_buffers(self):
+        """A (npol, nlanes, depth) delay line shifts depth, not lanes."""
+        bdata = np.arange(2 * 2 * 3).reshape(2, 2, 3)
+        fp = FixedPoint(8, 0, bdata, disbin=True)
+        out = fp.shift_insert(np.array([[90, 91], [92, 93]]))
+        np.testing.assert_array_equal(out.bdata, [[[90, 0, 1], [91, 3, 4]],
+                                                  [[92, 6, 7], [93, 9, 10]]])
+
+    def test_one_dimensional_works(self):
+        """Previously raised a confusing IndexError from the 2-D indexing."""
+        fp = FixedPoint(8, 0, np.array([1, 2, 3]), disbin=True)
+        np.testing.assert_array_equal(fp.shift_insert(np.array(9)).bdata, [9, 1, 2])
+
+    def test_a_length_one_leading_axis_is_preserved(self):
+        fp = FixedPoint(8, 0, np.array([[[1, 2, 3]]]), disbin=True)
+        out = fp.shift_insert(np.array([[9]]))
+        assert out.bdata.shape == (1, 1, 3)
+        np.testing.assert_array_equal(out.bdata, [[[9, 1, 2]]])
+
+    def test_wrong_insert_shape_is_rejected(self):
+        fp = FixedPoint(8, 0, np.array([[1, 2, 3], [4, 5, 6]]), disbin=True)
+        with pytest.raises(ValueError, match="does not fit the expected shape"):
+            fp.shift_insert(np.array([1, 2, 3]))
+
+    def test_format_and_mode_are_carried_over(self):
+        fp = FixedPoint(8, 4, np.array([[1, 2]]), disbin=True, ofmode="saturate")
+        out = fp.shift_insert(np.array([3]))
+        assert out.bwfw == (8, 4) and out.ofmode == "saturate"
+
+    def test_the_source_is_not_modified(self):
+        fp = FixedPoint(8, 0, np.array([[1, 2, 3]]), disbin=True)
+        before = fp.bdata.copy()
+        fp.shift_insert(np.array([9]))
+        np.testing.assert_array_equal(fp.bdata, before)
+
+    def test_repeated_inserts_walk_the_buffer(self):
+        """n inserts move a sample n positions along, which is what a delay line does."""
+        fp = FixedPoint(8, 0, np.zeros((1, 4), dtype=np.int64), disbin=True)
+        fp = fp.shift_insert(np.array([5]))
+        for _ in range(2):
+            fp = fp.shift_insert(np.array([0]))
+        assert int(fp.bdata[0, 2]) == 5

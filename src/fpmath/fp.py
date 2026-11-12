@@ -610,16 +610,19 @@ class FixedPoint:
 
     def shift_insert(self, bdata_insert: np.ndarray) -> FixedPoint:
         """
-        Shifts the bdata by one position in the 0 axis (by discarding the last entry), and inserts
-        a new entry in the beginning. This is used to simulate the data flow through the buffer.
-        :param bdata_insert:
+        Shifts the bdata by one position along the LAST axis (by discarding the last entry), and
+        inserts a new entry at the beginning. This is used to simulate the data flow through the
+        buffer. Any leading axes are preserved and act as independent buffers, so a
+        ``(npol, nlanes, depth)`` delay line shifts along ``depth``.
+
+        :param bdata_insert: The entry to insert, shaped like ``bdata[..., 0]``.
         :return: A new FixedPoint instance.
         """
-        if bdata_insert.shape != self.bdata[:, 0].shape:
-            raise ValueError(f"Passed data does not fit the expected shape of {self.bdata[:, 0].shape}")
+        if bdata_insert.shape != self.bdata[..., 0].shape:
+            raise ValueError(f"Passed data does not fit the expected shape of {self.bdata[..., 0].shape}")
         bdata = np.empty(self.bdata.shape, dtype=self.dtype)
-        bdata[:, 1:] = self.bdata[:, :-1]
-        bdata[:, 0] = bdata_insert
+        bdata[..., 1:] = self.bdata[..., :-1]
+        bdata[..., 0] = bdata_insert
         return self.copy(new_bdata=bdata)
 
 
